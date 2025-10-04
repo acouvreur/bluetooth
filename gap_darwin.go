@@ -1,6 +1,7 @@
 package bluetooth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -38,6 +39,12 @@ func (ad *Address) Set(val string) {
 // Scan starts a BLE scan. It is stopped by a call to StopScan. A common pattern
 // is to cancel the scan when a particular device has been found.
 func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) (err error) {
+	return a.ScanWithContext(context.Background(), callback)
+}
+
+// ScanWithContext starts a BLE scan. It is stopped by a call to StopScan. A common pattern
+// is to cancel the scan when a particular device has been found.
+func (a *Adapter) ScanWithContext(ctx context.Context, callback func(*Adapter, ScanResult)) (err error) {
 	if callback == nil {
 		return errors.New("must provide callback to Scan function")
 	}
@@ -62,6 +69,11 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) (err error) {
 	// the callback calls StopScan() (no new callbacks may be called after
 	// StopScan is called).
 	select {
+	case <-ctx.Done():
+		// StopScan can return an error, but we ignore it here since
+		// it only returns an error if no scan is in progress.
+		_ = a.StopScan()
+		return ctx.Err()
 	case <-a.scanChan:
 		close(a.scanChan)
 		a.scanChan = nil
@@ -104,6 +116,11 @@ type deviceInternal struct {
 
 // Connect starts a connection attempt to the given peripheral device address.
 func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, error) {
+	return a.ConnectWithContext(context.Background(), address, params)
+}
+
+// ConnectWithContext starts a connection attempt to the given peripheral device address.
+func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, params ConnectionParams) (Device, error) {
 	uuid, err := cbgo.ParseUUID(address.UUID.String())
 	if err != nil {
 		return Device{}, err
@@ -161,6 +178,16 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, err
 
 			// record an error to use when the disconnect comes through later.
 			connectionError = errors.New("timeout on Connect")
+
+			// we are not ready to return yet, we need to wait for the disconnect event to come through
+			// so continue on from this case and wait for something to show up on prphCh
+			continue
+		case <-ctx.Done():
+			// we need to cancel the connection if the context is done
+			a.cm.CancelConnect(prphs[0])
+
+			// record an error to use when the disconnect comes through later.
+			connectionError = ctx.Err()
 
 			// we are not ready to return yet, we need to wait for the disconnect event to come through
 			// so continue on from this case and wait for something to show up on prphCh
