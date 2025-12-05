@@ -306,3 +306,9 @@ func (c *deviceCharacteristic) ReadWithContext(ctx context.Context, data []byte)
 	copy(data, c.characteristic.Value())
 	return len(c.characteristic.Value()), nil
 }
+
+// ReadWithContext reads the current characteristic value.
+func (c *deviceCharacteristic) Value(data []byte) (n int, err error) {
+	copy(data, c.characteristic.Value())
+	return len(c.characteristic.Value()), nil
+}
