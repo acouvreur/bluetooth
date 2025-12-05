@@ -220,6 +220,12 @@ func (d Device) RequestConnectionParams(params ConnectionParams) error {
 	return nil
 }
 
+// Disconnect from the BLE device. This method is non-blocking and does not
+// wait until the connection is fully gone.
+func (d Device) Name() string {
+	return d.prph.Name()
+}
+
 // Peripheral delegate functions
 
 type peripheralDelegate struct {
