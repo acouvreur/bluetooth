@@ -260,6 +260,11 @@ func (c DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) err
 	return nil
 }
 
+func (c DeviceCharacteristic) DisableNotifications() {
+	c.callback = nil
+	c.service.device.prph.SetNotify(false, c.characteristic)
+}
+
 // GetMTU returns the MTU for the characteristic.
 func (c DeviceCharacteristic) GetMTU() (uint16, error) {
 	return uint16(c.service.device.prph.MaximumWriteValueLength(false)), nil
