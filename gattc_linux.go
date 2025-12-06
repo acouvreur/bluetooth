@@ -183,6 +183,19 @@ func (c DeviceCharacteristic) UUID() UUID {
 // Passing a nil slice of UUIDs will return a complete
 // list of characteristics.
 func (s DeviceService) DiscoverCharacteristics(uuids []UUID) ([]DeviceCharacteristic, error) {
+	return s.DiscoverCharacteristicsWithContext(context.Background(), uuids)
+}
+
+// DiscoverCharacteristics discovers characteristics in this service. Pass a
+// list of characteristic UUIDs you are interested in to this function. Either a
+// list of all requested services is returned, or if some services could not be
+// discovered an error is returned. If there is no error, the characteristics
+// slice has the same length as the UUID slice with characteristics in the same
+// order in the slice as in the requested UUID list.
+//
+// Passing a nil slice of UUIDs will return a complete
+// list of characteristics.
+func (s DeviceService) DiscoverCharacteristicsWithContext(ctx context.Context, uuids []UUID) ([]DeviceCharacteristic, error) {
 	var chars []DeviceCharacteristic
 	if len(uuids) > 0 {
 		// The caller wants to get a list of characteristics in a specific
@@ -193,7 +206,7 @@ func (s DeviceService) DiscoverCharacteristics(uuids []UUID) ([]DeviceCharacteri
 	// Iterate through all objects managed by BlueZ, hoping to find the
 	// characteristic we're looking for.
 	var list map[dbus.ObjectPath]map[string]map[string]dbus.Variant
-	err := s.adapter.bluez.Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&list)
+	err := s.adapter.bluez.CallWithContext(ctx, "org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&list)
 	if err != nil {
 		return nil, err
 	}
