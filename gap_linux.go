@@ -656,3 +656,12 @@ func (d *Device) parseProperties(props *map[string]dbus.Variant) error {
 
 	return nil
 }
+
+// Name returns the name of the adapter.
+func (a *Adapter) Name() (string, error) {
+	name, err := a.adapter.GetProperty("org.bluez.Adapter1.Name")
+	if err != nil {
+		return "", err
+	}
+	return name.Value().(string), nil
+}

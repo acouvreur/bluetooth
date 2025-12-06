@@ -3,6 +3,7 @@
 package bluetooth
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -217,12 +218,42 @@ func (s DeviceService) DiscoverCharacteristics(uuids []UUID) ([]DeviceCharacteri
 	return chars, nil
 }
 
+// Write replaces the characteristic value with a new value. The
+// call will return after all data has been written. This call is also known as a
+// "write request" (as opposed to a write command).
+func (c DeviceCharacteristic) Write(p []byte) (n int, err error) {
+	return c.WriteWithContext(context.Background(), p)
+}
+
+// Write replaces the characteristic value with a new value. The
+// call will return after all data has been written. This call is also known as a
+// "write request" (as opposed to a write command).
+func (c DeviceCharacteristic) WriteWithContext(ctx context.Context, p []byte) (n int, err error) {
+	err = c.characteristic.CallWithContext(ctx, "org.bluez.GattCharacteristic1.WriteValue", 0, p, map[string]dbus.Variant{
+		"type": dbus.MakeVariant("request"),
+	}).Err
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // WriteWithoutResponse replaces the characteristic value with a new value. The
 // call will return before all data has been written. A limited number of such
 // writes can be in flight at any given time. This call is also known as a
 // "write command" (as opposed to a write request).
 func (c DeviceCharacteristic) WriteWithoutResponse(p []byte) (n int, err error) {
-	err = c.characteristic.Call("org.bluez.GattCharacteristic1.WriteValue", 0, p, map[string]dbus.Variant(nil)).Err
+	return c.WriteWithoutResponseWithContext(context.Background(), p)
+}
+
+// WriteWithoutResponse replaces the characteristic value with a new value. The
+// call will return before all data has been written. A limited number of such
+// writes can be in flight at any given time. This call is also known as a
+// "write command" (as opposed to a write request).
+func (c DeviceCharacteristic) WriteWithoutResponseWithContext(ctx context.Context, p []byte) (n int, err error) {
+	err = c.characteristic.CallWithContext(ctx, "org.bluez.GattCharacteristic1.WriteValue", 0, p, map[string]dbus.Variant{
+		"type": dbus.MakeVariant("command"),
+	}).Err
 	if err != nil {
 		return 0, err
 	}
@@ -286,6 +317,28 @@ func (c *DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) er
 	}
 }
 
+// DisableNotifications disables notifications from this characteristic.
+func (c *DeviceCharacteristic) DisableNotifications() error {
+	if c.property == nil {
+		// Notifications are not enabled
+		return nil
+	}
+
+	// Stop receiving notifications from the peripheral
+	err := c.characteristic.Call("org.bluez.GattCharacteristic1.StopNotify", 0).Err
+	if err != nil {
+		return err
+	}
+
+	// Stop watching for D-Bus signals
+	c.adapter.bus.RemoveMatchSignal(c.propertiesChangedMatchOption)
+	c.adapter.bus.RemoveSignal(c.property)
+	close(c.property)
+	c.property = nil
+
+	return nil
+}
+
 // GetMTU returns the MTU for the characteristic.
 func (c DeviceCharacteristic) GetMTU() (uint16, error) {
 	mtu, err := c.characteristic.GetProperty("org.bluez.GattCharacteristic1.MTU")
@@ -297,12 +350,28 @@ func (c DeviceCharacteristic) GetMTU() (uint16, error) {
 
 // Read reads the current characteristic value.
 func (c DeviceCharacteristic) Read(data []byte) (int, error) {
+	return c.ReadWithContext(context.Background(), data)
+}
+
+// Read reads the current characteristic value.
+func (c DeviceCharacteristic) ReadWithContext(ctx context.Context, data []byte) (int, error) {
 	options := make(map[string]interface{})
 	var result []byte
-	err := c.characteristic.Call("org.bluez.GattCharacteristic1.ReadValue", 0, options).Store(&result)
+	err := c.characteristic.CallWithContext(ctx, "org.bluez.GattCharacteristic1.ReadValue", 0, options).Store(&result)
 	if err != nil {
 		return 0, err
 	}
 	copy(data, result)
 	return len(result), nil
+}
+
+// Value returns the cached value of the characteristic. This returns the last
+// value read or written, not the current value on the peripheral. Use Read to
+// get the current value from the peripheral.
+func (c DeviceCharacteristic) Value() ([]byte, error) {
+	value, err := c.characteristic.GetProperty("org.bluez.GattCharacteristic1.Value")
+	if err != nil {
+		return nil, err
+	}
+	return value.Value().([]byte), nil
 }
