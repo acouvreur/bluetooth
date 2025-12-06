@@ -1,9 +1,11 @@
 package bluetooth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
@@ -41,13 +43,24 @@ const (
 // Passing a nil slice of UUIDs will return a complete list of
 // services.
 func (d Device) DiscoverServices(filterUUIDs []UUID) ([]DeviceService, error) {
+	return d.DiscoverServicesWithContext(context.Background(), filterUUIDs)
+}
+
+// DiscoverServicesWithContext starts a service discovery procedure. Pass a list of service
+// UUIDs you are interested in to this function. Either a slice of all services
+// is returned (of the same length as the requested UUIDs and in the same
+// order), or if some services could not be discovered an error is returned.
+//
+// Passing a nil slice of UUIDs will return a complete list of
+// services.
+func (d Device) DiscoverServicesWithContext(ctx context.Context, filterUUIDs []UUID) ([]DeviceService, error) {
 	// IAsyncOperation<GattDeviceServicesResult>
 	getServicesOperation, err := d.device.GetGattServicesWithCacheModeAsync(bluetooth.BluetoothCacheModeUncached)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := awaitAsyncOperation(getServicesOperation, genericattributeprofile.SignatureGattDeviceServicesResult); err != nil {
+	if err := awaitAsyncOperation(ctx, getServicesOperation, genericattributeprofile.SignatureGattDeviceServicesResult); err != nil {
 		return nil, err
 	}
 
@@ -166,13 +179,26 @@ func (s DeviceService) UUID() UUID {
 // Passing a nil slice of UUIDs will return a complete
 // list of characteristics.
 func (s DeviceService) DiscoverCharacteristics(filterUUIDs []UUID) ([]DeviceCharacteristic, error) {
+	return s.DiscoverCharacteristicsWithContext(context.Background(), filterUUIDs)
+}
+
+// DiscoverCharacteristicsWithContext discovers characteristics in this service. Pass a
+// list of characteristic UUIDs you are interested in to this function. Either a
+// list of all requested characteristics is returned, or if some characteristics could not be
+// discovered an error is returned. If there is no error, the characteristics
+// slice has the same length as the UUID slice with characteristics in the same
+// order in the slice as in the requested UUID list.
+//
+// Passing a nil slice of UUIDs will return a complete
+// list of characteristics.
+func (s DeviceService) DiscoverCharacteristicsWithContext(ctx context.Context, filterUUIDs []UUID) ([]DeviceCharacteristic, error) {
 	getCharacteristicsOp, err := s.service.GetCharacteristicsWithCacheModeAsync(bluetooth.BluetoothCacheModeUncached)
 	if err != nil {
 		return nil, err
 	}
 
 	// IAsyncOperation<GattCharacteristicsResult>
-	if err := awaitAsyncOperation(getCharacteristicsOp, genericattributeprofile.SignatureGattCharacteristicsResult); err != nil {
+	if err := awaitAsyncOperation(ctx, getCharacteristicsOp, genericattributeprofile.SignatureGattCharacteristicsResult); err != nil {
 		return nil, err
 	}
 
@@ -266,28 +292,103 @@ func (c DeviceCharacteristic) GetMTU() (uint16, error) {
 	return c.service.device.session.GetMaxPduSize()
 }
 
+// Value reads the current in-memory value of the characteristic.
+// This retrieves the cached value without performing a new read operation.
+func (c DeviceCharacteristic) Value(data []byte) (n int, err error) {
+	// Read the cached value using ReadValueWithCacheMode with Cached mode
+	readOp, err := c.characteristic.ReadValueWithCacheModeAsync(bluetooth.BluetoothCacheModeCached)
+	if err != nil {
+		return 0, err
+	}
+
+	// IAsyncOperation<GattReadResult>
+	if err := awaitAsyncOperation(context.Background(), readOp, genericattributeprofile.SignatureGattReadResult); err != nil {
+		return 0, err
+	}
+
+	res, err := readOp.GetResults()
+	if err != nil {
+		return 0, err
+	}
+
+	result := (*genericattributeprofile.GattReadResult)(res)
+
+	buffer, err := result.GetValue()
+	if err != nil {
+		return 0, err
+	}
+
+	if buffer == nil {
+		return 0, nil
+	}
+
+	datareader, err := streams.DataReaderFromBuffer(buffer)
+	if err != nil {
+		return 0, err
+	}
+	defer datareader.Release()
+
+	bufferlen, err := buffer.GetLength()
+	if err != nil {
+		return 0, err
+	}
+
+	if bufferlen == 0 {
+		return 0, nil
+	}
+
+	readBuffer, err := datareader.ReadBytes(bufferlen)
+	if err != nil {
+		return 0, err
+	}
+
+	copy(data, readBuffer)
+	return len(readBuffer), nil
+}
+
+// CanSendWriteWithoutResponse returns whether a WriteWithoutResponse can be sent
+// at this time. If this returns false, you must wait for some time before
+// sending another WriteWithoutResponse. This is typically because the internal
+// buffer is full. You can use this to implement your own flow control when
+// sending many WriteWithoutResponse calls in a row.
+func (c DeviceCharacteristic) CanSendWriteWithoutResponse() bool {
+	// Windows WinRT doesn't expose buffer status directly, so we conservatively
+	// return true. The underlying WinRT implementation handles flow control.
+	return true
+}
+
 // Write replaces the characteristic value with a new value. The
 // call will return after all data has been written.
 func (c DeviceCharacteristic) Write(p []byte) (n int, err error) {
+	return c.WriteWithContext(context.Background(), p)
+}
+
+// Write replaces the characteristic value with a new value. The
+// call will return after all data has been written.
+func (c DeviceCharacteristic) WriteWithContext(ctx context.Context, p []byte) (n int, err error) {
 	if c.properties&genericattributeprofile.GattCharacteristicPropertiesWrite == 0 {
 		return 0, errNoWrite
 	}
 
-	return c.write(p, genericattributeprofile.GattWriteOptionWriteWithResponse)
+	return c.write(ctx, p, genericattributeprofile.GattWriteOptionWriteWithResponse)
+}
+
+func (c DeviceCharacteristic) WriteWithoutResponse(p []byte) (n int, err error) {
+	return c.WriteWithoutResponseWithContext(context.Background(), p)
 }
 
 // WriteWithoutResponse replaces the characteristic value with a new value. The
 // call will return before all data has been written. A limited number of such
 // writes can be in flight at any given time. This call is also known as a
 // "write command" (as opposed to a write request).
-func (c DeviceCharacteristic) WriteWithoutResponse(p []byte) (n int, err error) {
+func (c DeviceCharacteristic) WriteWithoutResponseWithContext(ctx context.Context, p []byte) (n int, err error) {
 	if c.properties&genericattributeprofile.GattCharacteristicPropertiesWriteWithoutResponse == 0 {
 		return 0, errNoWriteWithoutResponse
 	}
-	return c.write(p, genericattributeprofile.GattWriteOptionWriteWithoutResponse)
+	return c.write(ctx, p, genericattributeprofile.GattWriteOptionWriteWithoutResponse)
 }
 
-func (c DeviceCharacteristic) write(p []byte, mode genericattributeprofile.GattWriteOption) (n int, err error) {
+func (c DeviceCharacteristic) write(ctx context.Context, p []byte, mode genericattributeprofile.GattWriteOption) (n int, err error) {
 	// Convert data to buffer
 	writer, err := streams.NewDataWriter()
 	if err != nil {
@@ -308,7 +409,7 @@ func (c DeviceCharacteristic) write(p []byte, mode genericattributeprofile.GattW
 	// IAsyncOperation<GattCommunicationStatus>
 	asyncOp, err := c.characteristic.WriteValueWithOptionAsync(value, mode)
 
-	if err := awaitAsyncOperation(asyncOp, genericattributeprofile.SignatureGattCommunicationStatus); err != nil {
+	if err := awaitAsyncOperation(ctx, asyncOp, genericattributeprofile.SignatureGattCommunicationStatus); err != nil {
 		return 0, err
 	}
 
@@ -329,7 +430,14 @@ func (c DeviceCharacteristic) write(p []byte, mode genericattributeprofile.GattW
 }
 
 // Read reads the current characteristic value.
-func (c DeviceCharacteristic) Read(data []byte) (int, error) {
+func (c DeviceCharacteristic) Read(data []byte) (n int, err error) {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Second, errors.New("timeout on Read()"))
+	defer cancel()
+	return c.ReadWithContext(ctx, data)
+}
+
+// Read reads the current characteristic value.
+func (c DeviceCharacteristic) ReadWithContext(ctx context.Context, data []byte) (int, error) {
 	if c.properties&genericattributeprofile.GattCharacteristicPropertiesRead == 0 {
 		return 0, errNoRead
 	}
@@ -340,7 +448,7 @@ func (c DeviceCharacteristic) Read(data []byte) (int, error) {
 	}
 
 	// IAsyncOperation<GattReadResult>
-	if err := awaitAsyncOperation(readOp, genericattributeprofile.SignatureGattReadResult); err != nil {
+	if err := awaitAsyncOperation(ctx, readOp, genericattributeprofile.SignatureGattReadResult); err != nil {
 		return 0, err
 	}
 
@@ -378,11 +486,17 @@ func (c DeviceCharacteristic) Read(data []byte) (int, error) {
 // EnableNotifications enables notifications or indicate in the Client Characteristic
 // Configuration Descriptor (CCCD). And it favors Notify over Indicate.
 func (c DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) error {
+	return c.EnableNotificationsWithContext(context.Background(), callback)
+}
+
+// EnableNotificationsWithContext enables notifications or indicate in the Client Characteristic
+// Configuration Descriptor (CCCD). And it favors Notify over Indicate.
+func (c DeviceCharacteristic) EnableNotificationsWithContext(ctx context.Context, callback func(buf []byte)) error {
 	var err error
 	if c.properties&genericattributeprofile.GattCharacteristicPropertiesNotify != 0 {
-		err = c.EnableNotificationsWithMode(NotificationModeNotify, callback)
+		err = c.EnableNotificationsWithMode(ctx, NotificationModeNotify, callback)
 	} else if c.properties&genericattributeprofile.GattCharacteristicPropertiesIndicate != 0 {
-		err = c.EnableNotificationsWithMode(NotificationModeIndicate, callback)
+		err = c.EnableNotificationsWithMode(ctx, NotificationModeIndicate, callback)
 	} else {
 		return errNoNotifyOrIndicate
 	}
@@ -397,7 +511,7 @@ func (c DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) err
 // Configuration Descriptor (CCCD). This means that most peripherals will send a
 // notification with a new value every time the value of the characteristic
 // changes. And you can select the notify/indicate mode as you need.
-func (c DeviceCharacteristic) EnableNotificationsWithMode(mode NotificationMode, callback func(buf []byte)) error {
+func (c DeviceCharacteristic) EnableNotificationsWithMode(ctx context.Context, mode NotificationMode, callback func(buf []byte)) error {
 	configValue := genericattributeprofile.GattClientCharacteristicConfigurationDescriptorValueNone
 	if mode == NotificationModeIndicate {
 		if c.properties&genericattributeprofile.GattCharacteristicPropertiesIndicate == 0 {
@@ -455,7 +569,7 @@ func (c DeviceCharacteristic) EnableNotificationsWithMode(mode NotificationMode,
 	}
 
 	// IAsyncOperation<GattCommunicationStatus>
-	if err := awaitAsyncOperation(writeOp, genericattributeprofile.SignatureGattCommunicationStatus); err != nil {
+	if err := awaitAsyncOperation(ctx, writeOp, genericattributeprofile.SignatureGattCommunicationStatus); err != nil {
 		return err
 	}
 
@@ -468,6 +582,34 @@ func (c DeviceCharacteristic) EnableNotificationsWithMode(mode NotificationMode,
 
 	if result != genericattributeprofile.GattCommunicationStatusSuccess {
 		return errEnableNotificationsFailed
+	}
+
+	return nil
+}
+
+// DisableNotifications disables notifications from this characteristic.
+func (c DeviceCharacteristic) DisableNotifications() error {
+	// Set CCCD to None to disable notifications/indications
+	writeOp, err := c.characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+		genericattributeprofile.GattClientCharacteristicConfigurationDescriptorValueNone)
+	if err != nil {
+		return err
+	}
+
+	// IAsyncOperation<GattCommunicationStatus>
+	if err := awaitAsyncOperation(context.TODO(), writeOp, genericattributeprofile.SignatureGattCommunicationStatus); err != nil {
+		return err
+	}
+
+	res, err := writeOp.GetResults()
+	if err != nil {
+		return err
+	}
+
+	result := genericattributeprofile.GattCommunicationStatus(uintptr(res))
+
+	if result != genericattributeprofile.GattCommunicationStatusSuccess {
+		return fmt.Errorf("bluetooth: disable notifications failed with status %d", result)
 	}
 
 	return nil

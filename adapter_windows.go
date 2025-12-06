@@ -1,6 +1,7 @@
 package bluetooth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -33,7 +34,7 @@ func (a *Adapter) Enable() error {
 	return ole.RoInitialize(1) // initialize with multithreading enabled
 }
 
-func awaitAsyncOperation(asyncOperation *foundation.IAsyncOperation, genericParamSignature string) error {
+func awaitAsyncOperation(ctx context.Context, asyncOperation *foundation.IAsyncOperation, genericParamSignature string) error {
 	var status foundation.AsyncStatus
 
 	// We need to obtain the GUID of the AsyncOperationCompletedHandler, but its a generic delegate
@@ -52,7 +53,11 @@ func awaitAsyncOperation(asyncOperation *foundation.IAsyncOperation, genericPara
 	asyncOperation.SetCompleted(handler)
 
 	// Wait until async operation has stopped, and finish.
-	<-waitChan
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitChan:
+	}
 
 	if status != foundation.AsyncStatusCompleted {
 		return fmt.Errorf("async operation failed with status %d", status)

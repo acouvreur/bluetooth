@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
@@ -125,6 +127,12 @@ func (a *Advertisement) Stop() error {
 // Scan starts a BLE scan. It is stopped by a call to StopScan. A common pattern
 // is to cancel the scan when a particular device has been found.
 func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) (err error) {
+	return a.ScanWithContext(context.Background(), callback)
+}
+
+// ScanWithContext starts a BLE scan. It is stopped by a call to StopScan. A common pattern
+// is to cancel the scan when a particular device has been found.
+func (a *Adapter) ScanWithContext(ctx context.Context, callback func(*Adapter, ScanResult)) (err error) {
 	if a.watcher != nil {
 		// Cannot scan more than once: which one should ScanStop()
 		// stop?
@@ -206,8 +214,20 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) (err error) {
 		return err
 	}
 
-	// Wait until advertisement has stopped, and finish.
-	return <-stoppingChan
+	// Wait until advertisement has stopped, context is cancelled, or we finish.
+	select {
+	case err := <-stoppingChan:
+		return err
+	case <-ctx.Done():
+		// Context was cancelled, stop the scan
+		stopErr := a.StopScan()
+		if stopErr != nil {
+			return errors.Join(ctx.Err(), stopErr)
+		}
+		// Wait for the scan to actually stop
+		<-stoppingChan
+		return ctx.Err()
+	}
 }
 
 func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedEventArgs) ScanResult {
@@ -225,7 +245,9 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 	}
 
 	var manufacturerData []ManufacturerDataElement
+	var serviceUUIDs []UUID
 	if winAdv, err := args.GetAdvertisement(); err == nil && winAdv != nil {
+		// Extract manufacturer data
 		vector, _ := winAdv.GetManufacturerData()
 		size, _ := vector.GetSize()
 		for i := uint32(0); i < size; i++ {
@@ -238,6 +260,25 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 				Data:      bufferToSlice(buffer),
 			})
 		}
+
+		// Extract service UUIDs
+		vector, _ = winAdv.GetServiceUuids()
+		size, _ = vector.GetSize()
+		for i := uint32(0); i < size; i++ {
+			var outGuid syscall.GUID
+			hr, _, _ := syscall.SyscallN(
+				vector.VTable().GetAt,
+				uintptr(unsafe.Pointer(vector)),
+				uintptr(i),
+				uintptr(unsafe.Pointer(&outGuid)),
+			)
+			if hr != 0 {
+				println("failed to get service UUID")
+				continue
+			}
+			uuid := GUIDToUUID(outGuid)
+			serviceUUIDs = append(serviceUUIDs, uuid)
+		}
 	}
 
 	// Note: the IsRandom bit is never set.
@@ -246,6 +287,7 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 	result.AdvertisementPayload = &advertisementFields{
 		AdvertisementFields{
 			LocalName:        localName,
+			ServiceUUIDs:     serviceUUIDs,
 			ManufacturerData: manufacturerData,
 		},
 	}
@@ -262,6 +304,23 @@ func bufferToSlice(buffer *streams.IBuffer) []byte {
 	}
 	data, _ := dataReader.ReadBytes(bufferSize)
 	return data
+}
+
+func GUIDToUUID(guid syscall.GUID) UUID {
+	return NewUUID([16]byte{
+		byte(guid.Data1 >> 24),
+		byte(guid.Data1 >> 16),
+		byte(guid.Data1 >> 8),
+		byte(guid.Data1),
+		byte(guid.Data2 >> 8),
+		byte(guid.Data2),
+		byte(guid.Data3 >> 8),
+		byte(guid.Data3),
+		guid.Data4[0], guid.Data4[1],
+		guid.Data4[2], guid.Data4[3],
+		guid.Data4[4], guid.Data4[5],
+		guid.Data4[6], guid.Data4[7],
+	})
 }
 
 // StopScan stops any in-progress scan. It can be called from within a Scan
@@ -289,6 +348,13 @@ type Device struct {
 //
 // On Linux and Windows, the IsRandom part of the address is ignored.
 func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, error) {
+	return a.ConnectWithContext(context.Background(), address, params)
+}
+
+// ConnectWithContext starts a connection attempt to the given peripheral device address.
+//
+// On Linux and Windows, the IsRandom part of the address is ignored.
+func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, params ConnectionParams) (Device, error) {
 	var winAddr uint64
 	for i := range address.MAC {
 		winAddr += uint64(address.MAC[i]) << (8 * i)
@@ -302,7 +368,7 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, err
 
 	// We need to pass the signature of the parameter returned by the async operation:
 	// IAsyncOperation<BluetoothLEDevice>
-	if err := awaitAsyncOperation(bleDeviceOp, bluetooth.SignatureBluetoothLEDevice); err != nil {
+	if err := awaitAsyncOperation(ctx, bleDeviceOp, bluetooth.SignatureBluetoothLEDevice); err != nil {
 		return Device{}, fmt.Errorf("error connecting to device: %w", err)
 	}
 
@@ -333,7 +399,7 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, err
 		return Device{}, err
 	}
 
-	if err := awaitAsyncOperation(gattSessionOp, genericattributeprofile.SignatureGattSession); err != nil {
+	if err := awaitAsyncOperation(ctx, gattSessionOp, genericattributeprofile.SignatureGattSession); err != nil {
 		return Device{}, fmt.Errorf("error getting gatt session: %w", err)
 	}
 
@@ -386,6 +452,36 @@ func (d Device) Disconnect() error {
 	}
 
 	return nil
+}
+
+// Name returns the name of the remote device.
+func (d Device) Name() string {
+	// Try to get the device name by reading the Device Name characteristic from the Generic Access service
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Discover GAP service (Generic Access Profile)
+	gapUUID := New16BitUUID(0x1800) // Generic Access service UUID
+	services, err := d.DiscoverServicesWithContext(ctx, []UUID{gapUUID})
+	if err != nil || len(services) == 0 {
+		return ""
+	}
+
+	// Discover Device Name characteristic
+	deviceNameUUID := New16BitUUID(0x2A00) // Device Name characteristic UUID
+	characteristics, err := services[0].DiscoverCharacteristics([]UUID{deviceNameUUID})
+	if err != nil || len(characteristics) == 0 {
+		return ""
+	}
+
+	// Read the device name
+	nameData := make([]byte, 248) // Maximum BLE device name length
+	n, err := characteristics[0].ReadWithContext(ctx, nameData)
+	if err != nil {
+		return ""
+	}
+
+	return string(nameData[:n])
 }
 
 // RequestConnectionParams requests a different connection latency and timeout

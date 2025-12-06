@@ -1,6 +1,7 @@
 package bluetooth
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"syscall"
@@ -34,7 +35,7 @@ func (a *Adapter) AddService(s *Service) error {
 		return err
 	}
 
-	if err = awaitAsyncOperation(gattServiceOp, genericattributeprofile.SignatureGattServiceProviderResult); err != nil {
+	if err = awaitAsyncOperation(context.TODO(), gattServiceOp, genericattributeprofile.SignatureGattServiceProviderResult); err != nil {
 		return err
 	}
 
@@ -74,7 +75,7 @@ func (a *Adapter) AddService(s *Service) error {
 			return
 		}
 
-		if err = awaitAsyncOperation(reqAsyncOp, genericattributeprofile.SignatureGattWriteRequest); err != nil {
+		if err = awaitAsyncOperation(context.TODO(), reqAsyncOp, genericattributeprofile.SignatureGattWriteRequest); err != nil {
 			return
 		}
 
@@ -127,7 +128,7 @@ func (a *Adapter) AddService(s *Service) error {
 			return
 		}
 
-		if err = awaitAsyncOperation(reqAsyncOp, genericattributeprofile.SignatureGattReadRequest); err != nil {
+		if err = awaitAsyncOperation(context.TODO(), reqAsyncOp, genericattributeprofile.SignatureGattReadRequest); err != nil {
 			return
 		}
 
@@ -188,7 +189,7 @@ func (a *Adapter) AddService(s *Service) error {
 			return err
 		}
 
-		if err = awaitAsyncOperation(createCharOp, genericattributeprofile.SignatureGattLocalCharacteristicResult); err != nil {
+		if err = awaitAsyncOperation(context.TODO(), createCharOp, genericattributeprofile.SignatureGattLocalCharacteristicResult); err != nil {
 			return err
 		}
 
@@ -283,7 +284,8 @@ func (c *Characteristic) Write(p []byte) (n int, err error) {
 
 		// IVectorView<GattClientNotificationResult>
 		signature := fmt.Sprintf("pinterface({%s};%s)", collections.GUIDIVectorView, genericattributeprofile.SignatureGattClientNotificationResult)
-		if err = awaitAsyncOperation(op, signature); err != nil {
+		if err = awaitAsyncOperation(context.TODO(),
+			op, signature); err != nil {
 			return length, err
 		}
 		defer op.Release()
