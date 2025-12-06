@@ -137,6 +137,20 @@ type DeviceCharacteristic struct {
 	propertiesChangedMatchOption dbus.MatchOption  // the same value must be passed to RemoveMatchSignal
 }
 
+// CanSendWriteWithoutResponse returns whether a WriteWithoutResponse can be sent
+// at this time. If this returns false, you must wait for some time before
+// sending another WriteWithoutResponse. This is typically because the internal
+// buffer is full. You can use this to implement your own flow control when
+// sending many WriteWithoutResponse calls in a row.
+func (c DeviceCharacteristic) CanSendWriteWithoutResponse() bool {
+	capabilities, err := c.characteristic.GetProperty("org.bluez.GattCharacteristic1.WriteAcquired")
+	if err != nil {
+		// Assume we can write if we cannot get the property.
+		return true
+	}
+	return !capabilities.Value().(bool)
+}
+
 // UUID returns the UUID for this DeviceCharacteristic.
 func (c DeviceCharacteristic) UUID() UUID {
 	return c.uuidWrapper
@@ -368,10 +382,12 @@ func (c DeviceCharacteristic) ReadWithContext(ctx context.Context, data []byte) 
 // Value returns the cached value of the characteristic. This returns the last
 // value read or written, not the current value on the peripheral. Use Read to
 // get the current value from the peripheral.
-func (c DeviceCharacteristic) Value() ([]byte, error) {
+func (c DeviceCharacteristic) Value(b []byte) (n int, err error) {
 	value, err := c.characteristic.GetProperty("org.bluez.GattCharacteristic1.Value")
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
-	return value.Value().([]byte), nil
+	val := value.Value().([]byte)
+	copy(b, val)
+	return len(val), nil
 }

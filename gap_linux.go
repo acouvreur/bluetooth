@@ -3,6 +3,7 @@
 package bluetooth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -211,6 +212,18 @@ func (a *Advertisement) Stop() error {
 // possible some events are missed and perhaps even possible that some events
 // are duplicated.
 func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
+	return a.ScanWithContext(context.Background(), callback)
+}
+
+// Scan starts a BLE scan. It is stopped by a call to StopScan. A common pattern
+// is to cancel the scan when a particular device has been found.
+//
+// On Linux with BlueZ, incoming packets cannot be observed directly. Instead,
+// existing devices are watched for property changes. This closely simulates the
+// behavior as if the actual packets were observed, but it has flaws: it is
+// possible some events are missed and perhaps even possible that some events
+// are duplicated.
+func (a *Adapter) ScanWithContext(ctx context.Context, callback func(*Adapter, ScanResult)) error {
 	if a.scanCancelChan != nil {
 		return errScanning
 	}
@@ -243,8 +256,8 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
 	a.scanCancelChan = cancelChan
 
 	// This appears to be necessary to receive any BLE discovery results at all.
-	defer a.adapter.Call("org.bluez.Adapter1.SetDiscoveryFilter", 0)
-	err = a.adapter.Call("org.bluez.Adapter1.SetDiscoveryFilter", 0, map[string]interface{}{
+	defer a.adapter.CallWithContext(ctx, "org.bluez.Adapter1.SetDiscoveryFilter", 0)
+	err = a.adapter.CallWithContext(ctx, "org.bluez.Adapter1.SetDiscoveryFilter", 0, map[string]interface{}{
 		"Transport": "le",
 	}).Err
 	if err != nil {
@@ -257,7 +270,7 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
 	// list of cached devices as scan results as devices may be cached for a
 	// long time, long after they have moved out of range.
 	var deviceList map[dbus.ObjectPath]map[string]map[string]dbus.Variant
-	err = a.bluez.Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&deviceList)
+	err = a.bluez.CallWithContext(ctx, "org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&deviceList)
 	if err != nil {
 		return err
 	}
@@ -284,7 +297,7 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
 	// Instruct BlueZ to start discovering.
 	// NOTE: We must call Go here, not Call, because it can block if adapter is
 	// powered off, or was recently powered off.
-	startDiscovery := a.adapter.Go("org.bluez.Adapter1.StartDiscovery", 0, nil)
+	startDiscovery := a.adapter.GoWithContext(ctx, "org.bluez.Adapter1.StartDiscovery", 0, nil)
 
 	for {
 		// Check whether the scan is stopped. This is necessary to avoid a race
@@ -292,12 +305,20 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
 		// the callback calls StopScan() (no new callbacks may be called after
 		// StopScan is called).
 		select {
+		case <-ctx.Done():
+			close(cancelChan)
+			a.scanCancelChan = nil
+			return ctx.Err()
 		case <-cancelChan:
 			return a.adapter.Call("org.bluez.Adapter1.StopDiscovery", 0).Err
 		default:
 		}
 
 		select {
+		case <-ctx.Done():
+			close(cancelChan)
+			a.scanCancelChan = nil
+			return ctx.Err()
 		case <-startDiscovery.Done:
 			if startDiscovery.Err != nil {
 				close(cancelChan)
@@ -442,6 +463,13 @@ type Device struct {
 //
 // On Linux and Windows, the IsRandom part of the address is ignored.
 func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, error) {
+	return a.ConnectWithContext(context.Background(), address, params)
+}
+
+// Connect starts a connection attempt to the given peripheral device address.
+//
+// On Linux and Windows, the IsRandom part of the address is ignored.
+func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, params ConnectionParams) (Device, error) {
 	devicePath := dbus.ObjectPath(string(a.adapter.Path()) + "/dev_" + strings.Replace(address.MAC.String(), ":", "_", -1))
 	device := Device{
 		Address: address,
@@ -512,7 +540,12 @@ func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, err
 				}
 			}
 		}()
-		<-connectChan
+
+		select {
+		case <-ctx.Done():
+			return Device{}, ctx.Err()
+		case <-connectChan:
+		}
 
 		if err != nil {
 			return Device{}, err
@@ -536,6 +569,14 @@ func (d Device) Disconnect() error {
 	// we don't call our cancel function here, instead we wait for the
 	// property change in `watchForConnect` and cancel things then
 	return d.device.Call("org.bluez.Device1.Disconnect", 0).Err
+}
+
+func (d Device) Name() string {
+	name, err := d.device.GetProperty("org.bluez.Device1.Name")
+	if err != nil {
+		return ""
+	}
+	return name.Value().(string)
 }
 
 // RequestConnectionParams requests a different connection latency and timeout
@@ -655,13 +696,4 @@ func (d *Device) parseProperties(props *map[string]dbus.Variant) error {
 	}
 
 	return nil
-}
-
-// Name returns the name of the adapter.
-func (a *Adapter) Name() (string, error) {
-	name, err := a.adapter.GetProperty("org.bluez.Adapter1.Name")
-	if err != nil {
-		return "", err
-	}
-	return name.Value().(string), nil
 }
