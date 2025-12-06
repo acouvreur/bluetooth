@@ -43,8 +43,22 @@ func (s DeviceService) UUID() UUID {
 // On Linux with BlueZ, this just waits for the ServicesResolved signal (if
 // services haven't been resolved yet) and uses this list of cached services.
 func (d Device) DiscoverServices(uuids []UUID) ([]DeviceService, error) {
-	start := time.Now()
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Second, errors.New("timeout on DiscoverServices"))
+	defer cancel()
+	return d.DiscoverServicesWithContext(ctx, uuids)
+}
 
+// DiscoverServices starts a service discovery procedure. Pass a list of service
+// UUIDs you are interested in to this function. Either a slice of all services
+// is returned (of the same length as the requested UUIDs and in the same
+// order), or if some services could not be discovered an error is returned.
+//
+// Passing a nil slice of UUIDs will return a complete list of
+// services.
+//
+// On Linux with BlueZ, this just waits for the ServicesResolved signal (if
+// services haven't been resolved yet) and uses this list of cached services.
+func (d Device) DiscoverServicesWithContext(ctx context.Context, uuids []UUID) ([]DeviceService, error) {
 	for {
 		resolved, err := d.device.GetProperty("org.bluez.Device1.ServicesResolved")
 		if err != nil {
@@ -53,12 +67,15 @@ func (d Device) DiscoverServices(uuids []UUID) ([]DeviceService, error) {
 		if resolved.Value().(bool) {
 			break
 		}
-		// This is a terrible hack, but I couldn't find another way.
-		// TODO: actually there is, by waiting for a property change event of
-		// ServicesResolved.
-		time.Sleep(10 * time.Millisecond)
-		if time.Since(start) > 10*time.Second {
-			return nil, errors.New("timeout on DiscoverServices")
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			// This is a terrible hack, but I couldn't find another way.
+			// TODO: actually there is, by waiting for a property change event of
+			// ServicesResolved.
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
@@ -69,7 +86,7 @@ func (d Device) DiscoverServices(uuids []UUID) ([]DeviceService, error) {
 	// Iterate through all objects managed by BlueZ, hoping to find the services
 	// we're looking for.
 	var list map[dbus.ObjectPath]map[string]map[string]dbus.Variant
-	err := d.adapter.bluez.Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&list)
+	err := d.adapter.bluez.CallWithContext(ctx, "org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&list)
 	if err != nil {
 		return nil, err
 	}
