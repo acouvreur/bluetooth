@@ -249,7 +249,7 @@ func (a *Adapter) RemoveService(s *Service) error {
 		return err
 	}
 
-	if err = awaitAsyncOperation(gattServiceOp, genericattributeprofile.SignatureGattServiceProviderResult); err != nil {
+	if err = awaitAsyncOperation(context.TODO(), gattServiceOp, genericattributeprofile.SignatureGattServiceProviderResult); err != nil {
 		return err
 	}
 
