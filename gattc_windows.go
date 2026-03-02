@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"syscall"
 	"time"
 	"unsafe"
@@ -222,6 +223,13 @@ func (s DeviceService) DiscoverCharacteristicsWithContext(ctx context.Context, f
 	}
 
 	var characteristics []DeviceCharacteristic
+
+	if len(filterUUIDs) > 0 {
+		// The caller wants to get a list of characteristics in a specific
+		// order.
+		characteristics = make([]DeviceCharacteristic, len(filterUUIDs))
+	}
+
 	for i := uint32(0); i < characteristicsSize; i++ {
 		c, err := charVector.GetAt(i)
 		if err != nil {
@@ -243,33 +251,53 @@ func (s DeviceService) DiscoverCharacteristicsWithContext(ctx context.Context, f
 
 		// only include characteristics that are included in the input filter
 		if len(filterUUIDs) > 0 {
-			found := false
-			for _, uuid := range filterUUIDs {
+			for j, uuid := range filterUUIDs {
+				if characteristics[j] != (DeviceCharacteristic{}) {
+					// To support multiple identical characteristics, we
+					// need to ignore the characteristics that are already
+					// found. See:
+					// https://github.com/tinygo-org/bluetooth/issues/131
+					continue
+				}
 				if characteristicUUID.String() == uuid.String() {
 					// One of the characteristics we're looking for.
-					found = true
+					characteristics[j] = s.makeCharacteristic(characteristicUUID, characteristic, properties)
 					break
 				}
 			}
-			if !found {
-				continue
-			}
+		} else {
+			// The caller wants to get all characteristics, in any order.
+			characteristics = append(characteristics, s.makeCharacteristic(characteristicUUID, characteristic, properties))
 		}
+	}
 
-		characteristics = append(characteristics, DeviceCharacteristic{
-			uuidWrapper:    characteristicUUID,
-			service:        s,
-			characteristic: characteristic,
-			properties:     properties,
-		})
+	if slices.Contains(characteristics, (DeviceCharacteristic{})) {
+		return nil, errors.New("bluetooth: did not find all requested characteristic")
 	}
 
 	return characteristics, nil
 }
 
+// Small helper to create a DeviceCharacteristic object.
+func (s DeviceService) makeCharacteristic(uuid UUID, characteristic *genericattributeprofile.GattCharacteristic, properties genericattributeprofile.GattCharacteristicProperties) DeviceCharacteristic {
+	char := DeviceCharacteristic{
+		deviceCharacteristic: &deviceCharacteristic{
+			uuidWrapper:    uuid,
+			service:        s,
+			characteristic: characteristic,
+			properties:     properties,
+		},
+	}
+	return char
+}
+
 // DeviceCharacteristic is a BLE characteristic on a connected peripheral
 // device.
 type DeviceCharacteristic struct {
+	*deviceCharacteristic
+}
+
+type deviceCharacteristic struct {
 	uuidWrapper
 
 	characteristic *genericattributeprofile.GattCharacteristic

@@ -76,7 +76,6 @@ func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) error {
 			rp := rawAdvertisementPayload{len: a.hci.advData.eirLength}
 			copy(rp.data[:], a.hci.advData.eirData[:a.hci.advData.eirLength])
 			if rp.LocalName() != "" {
-				println("LocalName:", rp.LocalName())
 				adf.LocalName = rp.LocalName()
 			}
 
@@ -420,7 +419,7 @@ func (a *Advertisement) Start() error {
 			binary.LittleEndian.PutUint16(advertisingData[5:], uuid.Get16Bit())
 		case uuid.Is32Bit():
 			sz = 6
-			data := uuid.Bytes()
+			data := uuid.bytes()
 			slices.Reverse(data[:])
 			copy(advertisingData[5:], data[:])
 		}

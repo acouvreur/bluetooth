@@ -244,11 +244,18 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 		Address: adr,
 	}
 
+	winAdv, err := args.GetAdvertisement()
+	if err != nil {
+		return result
+	}
+	defer winAdv.Release()
+
 	var manufacturerData []ManufacturerDataElement
 	var serviceUUIDs []UUID
 	if winAdv, err := args.GetAdvertisement(); err == nil && winAdv != nil {
 		// Extract manufacturer data
 		vector, _ := winAdv.GetManufacturerData()
+		defer vector.Release()
 		size, _ := vector.GetSize()
 		for i := uint32(0); i < size; i++ {
 			element, _ := vector.GetAt(i)
@@ -259,6 +266,8 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 				CompanyID: companyID,
 				Data:      bufferToSlice(buffer),
 			})
+			buffer.Release()
+			manData.Release()
 		}
 
 		// Extract service UUIDs
@@ -282,8 +291,7 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 	}
 
 	// Note: the IsRandom bit is never set.
-	advertisement, _ := args.GetAdvertisement()
-	localName, _ := advertisement.GetLocalName()
+	localName, _ := winAdv.GetLocalName()
 	result.AdvertisementPayload = &advertisementFields{
 		AdvertisementFields{
 			LocalName:        localName,
@@ -340,8 +348,10 @@ type Device struct {
 
 	Address Address // the MAC address of the device
 
-	device  *bluetooth.BluetoothLEDevice
-	session *genericattributeprofile.GattSession
+	device                        *bluetooth.BluetoothLEDevice
+	session                       *genericattributeprofile.GattSession
+	connectionStatusListenerToken foundation.EventRegistrationToken
+	connectionStatusListener      *foundation.TypedEventHandler
 }
 
 // Connect starts a connection attempt to the given peripheral device address.
@@ -425,8 +435,36 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 		session: newSession,
 	}
 
-	if a.connectHandler != nil {
-		a.connectHandler(device, true)
+	// https://learn.microsoft.com/es-es/uwp/api/windows.devices.bluetooth.bluetoothledevice.connectionstatuschanged?view=winrt-26100
+	// TypedEventHandler<BluetoothLEDevice,object>
+	connectionStatusChangedGUID := winrt.ParameterizedInstanceGUID(
+		foundation.GUIDTypedEventHandler,
+		bluetooth.SignatureBluetoothLEDevice,
+		"cinterface(IInspectable)", // object
+	)
+
+	handler := foundation.NewTypedEventHandler(ole.NewGUID(connectionStatusChangedGUID), func(instance *foundation.TypedEventHandler, sender, arg unsafe.Pointer) {
+		status, err := bleDevice.GetConnectionStatus()
+		if err != nil {
+			return
+		}
+		if status == bluetooth.BluetoothConnectionStatusDisconnected {
+			device.Disconnect()
+		}
+
+		if a.connectHandler != nil {
+			a.connectHandler(device, status == bluetooth.BluetoothConnectionStatusConnected)
+		}
+	})
+
+	token, err := device.device.AddConnectionStatusChanged(handler)
+
+	device.connectionStatusListenerToken = token
+	device.connectionStatusListener = handler
+
+	if err != nil {
+		_ = handler.Release()
+		return device, err
 	}
 
 	return device, nil
@@ -437,18 +475,20 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 func (d Device) Disconnect() error {
 	defer d.device.Release()
 	defer d.session.Release()
+	if d.connectionStatusListener != nil {
+		defer d.connectionStatusListener.Release()
+	}
 
 	d.cancel()
 
 	if err := d.session.Close(); err != nil {
 		return err
 	}
+
+	_ = d.device.RemoveConnectionStatusChanged(d.connectionStatusListenerToken)
+
 	if err := d.device.Close(); err != nil {
 		return err
-	}
-
-	if DefaultAdapter.connectHandler != nil {
-		DefaultAdapter.connectHandler(d, false)
 	}
 
 	return nil
