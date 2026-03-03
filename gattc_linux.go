@@ -311,6 +311,16 @@ func (c DeviceCharacteristic) WriteWithoutResponseWithContext(ctx context.Contex
 //
 // Users may call EnableNotifications with a nil callback to disable notifications.
 func (c *DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) error {
+	return c.EnableNotificationsWithContext(context.Background(), callback)
+}
+
+// EnableNotifications enables notifications in the Client Characteristic
+// Configuration Descriptor (CCCD). This means that most peripherals will send a
+// notification with a new value every time the value of the characteristic
+// changes.
+//
+// Users may call EnableNotifications with a nil callback to disable notifications.
+func (c *DeviceCharacteristic) EnableNotificationsWithContext(ctx context.Context, callback func(buf []byte)) error {
 	switch callback {
 	default:
 		if c.property != nil {
