@@ -92,6 +92,13 @@ func (d Device) DiscoverServicesWithContext(ctx context.Context, filterUUIDs []U
 	}
 
 	var services []DeviceService
+
+	if len(filterUUIDs) > 0 {
+		// The caller wants to get a list of services in a specific
+		// order.
+		services = make([]DeviceService, len(filterUUIDs))
+	}
+
 	for i := uint32(0); i < servicesSize; i++ {
 		s, err := servicesVector.GetAt(i)
 		if err != nil {
@@ -108,29 +115,38 @@ func (d Device) DiscoverServicesWithContext(ctx context.Context, filterUUIDs []U
 
 		// only include services that are included in the input filter
 		if len(filterUUIDs) > 0 {
-			found := false
-			for _, uuid := range filterUUIDs {
+			for j, uuid := range filterUUIDs {
 				if serviceUuid.String() == uuid.String() {
 					// One of the services we're looking for.
-					found = true
+					services[j] = DeviceService{
+						deviceService: &deviceService{
+							uuidWrapper: serviceUuid,
+							service:     srv,
+							device:      d,
+						},
+					}
 					break
 				}
 			}
-			if !found {
-				continue
-			}
+		} else {
+			// The caller wants to get all services, in any order.
+			services = append(services, DeviceService{
+				deviceService: &deviceService{
+					uuidWrapper: serviceUuid,
+					service:     srv,
+					device:      d,
+				},
+			})
 		}
 
 		go func() {
 			<-d.ctx.Done()
 			srv.Close()
 		}()
+	}
 
-		services = append(services, DeviceService{
-			uuidWrapper: serviceUuid,
-			service:     srv,
-			device:      d,
-		})
+	if slices.Contains(services, (DeviceService{})) {
+		return nil, errors.New("bluetooth: did not find all requested services")
 	}
 
 	return services, nil
@@ -157,8 +173,23 @@ func winRTUuidToUuid(uuid syscall.GUID) UUID {
 // struct method of the same name.
 type uuidWrapper = UUID
 
-// DeviceService is a BLE service on a connected peripheral device.
+func makeService(serviceUuid uuidWrapper, srv *genericattributeprofile.GattDeviceService, d Device) DeviceService {
+	svc := DeviceService{
+		deviceService: &deviceService{
+			uuidWrapper: serviceUuid,
+			service:     srv,
+			device:      d,
+		},
+	}
+	return svc
+}
+
 type DeviceService struct {
+	*deviceService
+}
+
+// DeviceService is a BLE service on a connected peripheral device.
+type deviceService struct {
 	uuidWrapper
 
 	service *genericattributeprofile.GattDeviceService
