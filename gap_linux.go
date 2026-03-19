@@ -579,6 +579,15 @@ func (d Device) Name() string {
 	return name.Value().(string)
 }
 
+// Connected returns whether the device is currently connected.
+func (d Device) Connected() (bool, error) {
+	val, err := d.device.GetProperty("org.bluez.Device1.Connected")
+	if err != nil {
+		return false, err
+	}
+	return val.Value().(bool), nil
+}
+
 // RequestConnectionParams requests a different connection latency and timeout
 // of the given device connection. Fields that are unset will be left alone.
 // Whether or not the device will actually honor this, depends on the device and
