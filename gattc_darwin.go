@@ -30,7 +30,16 @@ func (d Device) DiscoverServices(uuids []UUID) ([]DeviceService, error) {
 // Passing a nil slice of UUIDs will return a complete list of
 // services.
 func (d Device) DiscoverServicesWithContext(ctx context.Context, uuids []UUID) ([]DeviceService, error) {
-	d.prph.DiscoverServices([]cbgo.UUID{})
+	cbuuids := make([]cbgo.UUID, len(uuids))
+	for i, u := range uuids {
+		cbuuid, err := cbgo.ParseUUID(u.String())
+		if err != nil {
+			return nil, err
+		}
+		cbuuids[i] = cbuuid
+	}
+
+	d.prph.DiscoverServices(cbuuids)
 
 	// clear cache of services
 	d.services = make(map[UUID]DeviceService)
