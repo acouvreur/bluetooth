@@ -117,6 +117,8 @@ type deviceInternal struct {
 	charsChan    chan error
 
 	services map[UUID]DeviceService
+
+	l2capChan chan l2capResult
 }
 
 // Connect starts a connection attempt to the given peripheral device address.
@@ -290,5 +292,12 @@ func (pd *peripheralDelegate) DidWriteValueForCharacteristic(_ cbgo.Peripheral, 
 				}
 			}
 		}
+	}
+}
+
+// DidOpenL2CAPChannel is called when an L2CAP channel has been opened.
+func (pd *peripheralDelegate) DidOpenL2CAPChannel(prph cbgo.Peripheral, channel cbgo.L2CAPChannel, err error) {
+	if pd.d.l2capChan != nil {
+		pd.d.l2capChan <- l2capResult{channel: channel, err: err}
 	}
 }
