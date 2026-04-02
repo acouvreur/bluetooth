@@ -230,6 +230,7 @@ type deviceCharacteristic struct {
 	callback       func(buf []byte)
 	readChan       chan error
 	writeChan      chan error
+	notifyChan     chan error
 }
 
 // UUID returns the UUID for this DeviceCharacteristic.
@@ -287,7 +288,9 @@ func (c DeviceCharacteristic) WriteWithoutResponseWithContext(ctx context.Contex
 // changes.
 // Users may call EnableNotifications with a nil callback to disable notifications.
 func (c DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) error {
-	return c.EnableNotificationsWithContext(context.Background(), callback)
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Second, errors.New("timeout on EnableNotifications"))
+	defer cancel()
+	return c.EnableNotificationsWithContext(ctx, callback)
 }
 
 // EnableNotifications enables notifications in the Client Characteristic
@@ -296,15 +299,35 @@ func (c DeviceCharacteristic) EnableNotifications(callback func(buf []byte)) err
 // changes.
 // Users may call EnableNotifications with a nil callback to disable notifications.
 func (c DeviceCharacteristic) EnableNotificationsWithContext(ctx context.Context, callback func(buf []byte)) error {
-	// If callback is nil, disable notifications
+	c.notifyChan = make(chan error)
+
 	if callback == nil {
 		c.service.device.prph.SetNotify(false, c.characteristic)
-		c.callback = nil // Clear notification callback
 	} else {
-		// Enable notifications and set notification callback
 		c.callback = callback
 		c.service.device.prph.SetNotify(true, c.characteristic)
 	}
+
+	// Wait for CoreBluetooth to confirm the notification state change.
+	var err error
+	select {
+	case err = <-c.notifyChan:
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+
+	c.notifyChan = nil
+
+	if err != nil {
+		c.callback = nil
+		return err
+	}
+
+	// Clear callback after confirmed disable.
+	if callback == nil {
+		c.callback = nil
+	}
+
 	return nil
 }
 
