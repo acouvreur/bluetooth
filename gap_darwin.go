@@ -151,6 +151,8 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 	a.cm.Connect(prphs[0], nil)
 	timeoutTimer := time.NewTimer(timeout)
 	var connectionError error
+	timeoutCh := timeoutTimer.C
+	ctxDoneCh := ctx.Done()
 
 	for {
 		// wait on channel for connect
@@ -159,7 +161,10 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 
 			// check if we have received a disconnected peripheral
 			if p.State() == cbgo.PeripheralStateDisconnected {
-				return Device{}, connectionError
+				if connectionError != nil {
+					return Device{}, connectionError
+				}
+				return Device{}, errors.New("connection failed")
 			}
 
 			d := Device{
@@ -179,22 +184,28 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 
 			return d, nil
 
-		case <-timeoutTimer.C:
+		case <-timeoutCh:
 			// we need to cancel the connection if we have timed out ourselves
 			a.cm.CancelConnect(prphs[0])
 
 			// record an error to use when the disconnect comes through later.
 			connectionError = errors.New("timeout on Connect")
 
+			// nil the channel so we don't spin on it
+			timeoutCh = nil
+
 			// we are not ready to return yet, we need to wait for the disconnect event to come through
 			// so continue on from this case and wait for something to show up on prphCh
 			continue
-		case <-ctx.Done():
+		case <-ctxDoneCh:
 			// we need to cancel the connection if the context is done
 			a.cm.CancelConnect(prphs[0])
 
 			// record an error to use when the disconnect comes through later.
 			connectionError = ctx.Err()
+
+			// nil the channel so we don't spin on it
+			ctxDoneCh = nil
 
 			// we are not ready to return yet, we need to wait for the disconnect event to come through
 			// so continue on from this case and wait for something to show up on prphCh

@@ -7,7 +7,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/saltosystems/winrt-go v0.0.0-20241223121953-98e32661f6ff
 	github.com/soypat/cyw43439 v0.0.0-20250505012923-830110c8f4af
-	github.com/tinygo-org/cbgo v0.0.4
+	github.com/tinygo-org/cbgo v0.0.5-0.20260404133704-78b73a9c8e7e
 	golang.org/x/crypto v0.26.0
 	tinygo.org/x/drivers v0.33.0
 	tinygo.org/x/tinyfont v0.6.0
@@ -23,5 +23,3 @@ require (
 	golang.org/x/sys v0.23.0 // indirect
 	golang.org/x/term v0.23.0 // indirect
 )
-
-replace github.com/tinygo-org/cbgo => ../cbgo
