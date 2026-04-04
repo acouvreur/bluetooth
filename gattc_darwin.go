@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	errCannotSendWriteWithoutResponse = errors.New("bluetooth: cannot send write without response (buffer full)")
+	errWriteWithoutResponseTimeout = errors.New("bluetooth: write without response timed out waiting for buffer space")
 )
 
 // DiscoverServices starts a service discovery procedure. Pass a list of service
@@ -280,7 +280,18 @@ func (c DeviceCharacteristic) WriteWithoutResponse(p []byte) (n int, err error) 
 // writes can be in flight at any given time.
 func (c DeviceCharacteristic) WriteWithoutResponseWithContext(ctx context.Context, p []byte) (n int, err error) {
 	if !c.service.device.prph.CanSendWriteWithoutResponse() {
-		return 0, errCannotSendWriteWithoutResponse
+		// Drain any stale readiness signal.
+		select {
+		case <-c.service.device.writeWithoutResponseCh:
+		default:
+		}
+
+		// Wait for the delegate callback signalling the peripheral is ready.
+		select {
+		case <-c.service.device.writeWithoutResponseCh:
+		case <-time.NewTimer(10 * time.Second).C:
+			return 0, errWriteWithoutResponseTimeout
+		}
 	}
 
 	c.service.device.prph.WriteCharacteristic(p, c.characteristic, false)
