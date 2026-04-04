@@ -130,6 +130,15 @@ func NewDuration(interval time.Duration) Duration {
 // Connection is a numeric identifier that indicates a connection handle.
 type Connection uint16
 
+// GAPDevice is the shared interface that all platform-specific Device types must implement.
+type GAPDevice interface {
+	DiscoverServices(uuids []UUID) ([]DeviceService, error)
+	RequestConnectionParams(params ConnectionParams) error
+	Connected() (bool, error)
+	Disconnect() error
+	OpenL2CAPChannel(psm L2CAPPSM) (*L2CAPConn, error)
+}
+
 // ScanResult contains information from when an advertisement packet was
 // received. It is passed as a parameter to the callback of the Scan method.
 type ScanResult struct {
@@ -605,3 +614,14 @@ type ConnectionParams struct {
 	// specified, the timeout will be unchanged.
 	Timeout Duration
 }
+
+type PHY int
+
+const (
+	// PHY1M is the 1M PHY, which is the default for Bluetooth LE.
+	PHY1M PHY = iota
+	// PHY2M is the 2M PHY, which allows for higher data rates but consumes more power.
+	PHY2M
+	// PHYCoded is the Coded PHY, which allows for longer range at the cost of lower data rates.
+	PHYCoded
+)

@@ -3,14 +3,12 @@ package bluetooth
 import (
 	"errors"
 	"io"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/tinygo-org/cbgo"
 )
-
-// L2CAPPSM represents an L2CAP Protocol/Service Multiplexer identifier.
-type L2CAPPSM = uint16
 
 // l2capResult is used internally to communicate the result of an L2CAP channel
 // open operation from the delegate callback to the calling goroutine.
@@ -23,13 +21,11 @@ type l2capResult struct {
 // It implements io.ReadWriteCloser for bidirectional communication.
 type L2CAPConn struct {
 	channel cbgo.L2CAPChannel
-	device  Device
 	mu      sync.Mutex
 	closed  bool
 }
 
-// Compile-time check that L2CAPConn implements io.ReadWriteCloser.
-var _ io.ReadWriteCloser = (*L2CAPConn)(nil)
+var _ L2CAPChannel = (*L2CAPConn)(nil)
 
 // OpenL2CAPChannel opens an L2CAP Connection-Oriented Channel to the
 // connected peripheral. The PSM (Protocol/Service Multiplexer) identifies the
@@ -50,15 +46,14 @@ func (d Device) OpenL2CAPChannel(psm L2CAPPSM) (*L2CAPConn, error) {
 		}
 		return &L2CAPConn{
 			channel: result.channel,
-			device:  d,
 		}, nil
 	case <-time.NewTimer(30 * time.Second).C:
 		return nil, errors.New("bluetooth: timeout on OpenL2CAPChannel")
 	}
 }
 
-// Read reads data from the L2CAP channel. It blocks until data is available
-// or the channel is closed.
+// Read reads data from the L2CAP channel. It blocks until data is available,
+// the channel is closed locally, or the remote end closes the stream (EOF).
 func (c *L2CAPConn) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -80,8 +75,18 @@ func (c *L2CAPConn) Read(p []byte) (int, error) {
 			return n, nil
 		}
 
-		// No data available yet, wait briefly before retrying.
-		time.Sleep(1 * time.Millisecond)
+		// c.channel.Read returns 0 in two cases:
+		//  - hasBytesAvailable was false → no data yet, retry.
+		//  - hasBytesAvailable was true but NSInputStream read returned 0 → EOF.
+		// Distinguish them by checking HasBytesAvailable after a 0-byte read.
+		if !c.channel.HasBytesAvailable() {
+			// No data available yet, yield and retry.
+			runtime.Gosched()
+			continue
+		}
+		// The stream reported bytes available yet Read returned 0:
+		// the input stream has reached end-of-stream.
+		return 0, io.EOF
 	}
 }
 
@@ -101,6 +106,12 @@ func (c *L2CAPConn) Write(p []byte) (int, error) {
 		}
 		c.mu.Unlock()
 
+		// Output stream not ready yet, yield and retry.
+		if !c.channel.HasSpaceAvailable() {
+			runtime.Gosched()
+			continue
+		}
+
 		n := c.channel.Write(p[total:])
 		if n < 0 {
 			return total, errors.New("bluetooth: L2CAP write error")
@@ -109,9 +120,6 @@ func (c *L2CAPConn) Write(p []byte) (int, error) {
 			total += n
 			continue
 		}
-
-		// Output stream not ready yet, wait briefly before retrying.
-		time.Sleep(1 * time.Millisecond)
 	}
 	return total, nil
 }

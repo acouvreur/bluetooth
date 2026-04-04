@@ -267,6 +267,8 @@ type notificationRegistration struct {
 	callback func([]byte)
 }
 
+var _ GAPDevice = Device{}
+
 // Device is a connection to a remote peripheral.
 type Device struct {
 	Address Address
@@ -292,6 +294,10 @@ func (d Device) Disconnect() error {
 
 	d.adapter.removeConnection(d)
 	return nil
+}
+
+func (d Device) Connected() (bool, error) {
+	return false, errNotYetImplmented
 }
 
 // RequestConnectionParams requests a different connection latency and timeout

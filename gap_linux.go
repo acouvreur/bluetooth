@@ -451,6 +451,8 @@ func makeScanResult(props map[string]dbus.Variant) ScanResult {
 	}
 }
 
+var _ GAPDevice = Device{}
+
 // Device is a connection to a remote bluetooth device.
 type Device struct {
 	Address Address // the MAC address of the device
@@ -569,14 +571,6 @@ func (d Device) Disconnect() error {
 	// we don't call our cancel function here, instead we wait for the
 	// property change in `watchForConnect` and cancel things then
 	return d.device.Call("org.bluez.Device1.Disconnect", 0).Err
-}
-
-func (d Device) Name() string {
-	name, err := d.device.GetProperty("org.bluez.Device1.Name")
-	if err != nil {
-		return ""
-	}
-	return name.Value().(string)
 }
 
 // Connected returns whether the device is currently connected.

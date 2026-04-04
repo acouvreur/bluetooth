@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
@@ -341,6 +340,8 @@ func (a *Adapter) StopScan() error {
 	return a.watcher.Stop()
 }
 
+var _ GAPDevice = Device{}
+
 // Device is a connection to a remote peripheral.
 type Device struct {
 	ctx    context.Context
@@ -492,36 +493,6 @@ func (d Device) Disconnect() error {
 	}
 
 	return nil
-}
-
-// Name returns the name of the remote device.
-func (d Device) Name() string {
-	// Try to get the device name by reading the Device Name characteristic from the Generic Access service
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Discover GAP service (Generic Access Profile)
-	gapUUID := New16BitUUID(0x1800) // Generic Access service UUID
-	services, err := d.DiscoverServicesWithContext(ctx, []UUID{gapUUID})
-	if err != nil || len(services) == 0 {
-		return ""
-	}
-
-	// Discover Device Name characteristic
-	deviceNameUUID := New16BitUUID(0x2A00) // Device Name characteristic UUID
-	characteristics, err := services[0].DiscoverCharacteristics([]UUID{deviceNameUUID})
-	if err != nil || len(characteristics) == 0 {
-		return ""
-	}
-
-	// Read the device name
-	nameData := make([]byte, 248) // Maximum BLE device name length
-	n, err := characteristics[0].ReadWithContext(ctx, nameData)
-	if err != nil {
-		return ""
-	}
-
-	return string(nameData[:n])
 }
 
 // Connected returns whether the device is currently connected.
