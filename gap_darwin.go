@@ -181,7 +181,7 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 			d.delegate = &peripheralDelegate{d: d}
 			p.SetDelegate(d.delegate)
 
-			a.connectHandler(d, true)
+			a.connectHandler(d, true, nil)
 
 			return d, nil
 
@@ -277,7 +277,7 @@ func (pd *peripheralDelegate) DidUpdateValueForCharacteristic(prph cbgo.Peripher
 
 			if char.characteristic == chr && uuid == char.UUID() { // compare pointers
 				if err == nil && char.callback != nil {
-					go char.callback(chr.Value())
+					char.callback(chr.Value())
 				}
 
 				if char.readChan != nil {

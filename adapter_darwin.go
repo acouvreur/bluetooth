@@ -8,6 +8,8 @@ import (
 	"github.com/tinygo-org/cbgo"
 )
 
+var _ BLEAdapter = (*Adapter)(nil)
+
 // Adapter is a connection to BLE devices.
 type Adapter struct {
 	cmd *centralManagerDelegate
@@ -24,7 +26,7 @@ type Adapter struct {
 	// used to allow multiple callers to call Connect concurrently.
 	connectMap sync.Map
 
-	connectHandler func(device Device, connected bool)
+	connectHandler func(device Device, connected bool, err error)
 }
 
 // DefaultAdapter is the default adapter on the system.
@@ -35,7 +37,7 @@ var DefaultAdapter = &Adapter{
 	pm:         cbgo.NewPeripheralManager(nil),
 	connectMap: sync.Map{},
 
-	connectHandler: func(device Device, connected bool) {
+	connectHandler: func(device Device, connected bool, err error) {
 		return
 	},
 }
@@ -106,7 +108,7 @@ func (cmd *centralManagerDelegate) DidDisconnectPeripheral(cmgr cbgo.CentralMana
 	addr := Address{}
 	uuid, _ := ParseUUID(id)
 	addr.UUID = uuid
-	cmd.a.connectHandler(Device{Address: addr}, false)
+	cmd.a.connectHandler(Device{Address: addr}, false, err)
 
 	// like with DidConnectPeripheral, check if we have a chan allocated for this and send through the peripheral
 	// this will only be true if the receiving side is still waiting for a connection to complete
@@ -118,6 +120,10 @@ func (cmd *centralManagerDelegate) DidDisconnectPeripheral(cmgr cbgo.CentralMana
 // DidConnectPeripheral when peripheral is connected.
 func (cmd *centralManagerDelegate) DidConnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral) {
 	id := prph.Identifier().String()
+	addr := Address{}
+	uuid, _ := ParseUUID(id)
+	addr.UUID = uuid
+	cmd.a.connectHandler(Device{Address: addr}, true, nil)
 
 	// Check if we have a chan allocated for this peripheral, and remove it
 	// from the map if so (it's single-use, will be garbage collected after
@@ -134,8 +140,12 @@ func (cmd *centralManagerDelegate) DidConnectPeripheral(cmgr cbgo.CentralManager
 // DidFailToConnectPeripheral when peripheral connection fails.
 func (cmd *centralManagerDelegate) DidFailToConnectPeripheral(cmgr cbgo.CentralManager, prph cbgo.Peripheral, err error) {
 	id := prph.Identifier().String()
+	addr := Address{}
+	uuid, _ := ParseUUID(id)
+	addr.UUID = uuid
+	cmd.a.connectHandler(Device{Address: addr}, false, err)
 
-	// Send the peripheral through so ConnectWithContext can check its state
+	// Send the peripheral through so Connect can check its state
 	// and return the appropriate error.
 	if ch, ok := cmd.a.connectMap.LoadAndDelete(id); ok {
 		ch.(chan cbgo.Peripheral) <- prph

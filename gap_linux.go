@@ -555,7 +555,7 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 	}
 
 	if a.connectHandler != nil {
-		a.connectHandler(device, true)
+		a.connectHandler(device, true, nil)
 	}
 
 	return device, nil
@@ -565,7 +565,7 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 // wait until the connection is fully gone.
 func (d Device) Disconnect() error {
 	if d.adapter.connectHandler != nil {
-		d.adapter.connectHandler(d, false)
+		d.adapter.connectHandler(d, false, nil)
 	}
 
 	// we don't call our cancel function here, instead we wait for the
@@ -643,7 +643,7 @@ func (a *Advertisement) handleDBusSignals() {
 				}
 
 				if connected, ok := props[bluezDevice1Connected].Value().(bool); ok {
-					a.adapter.connectHandler(device, connected)
+					a.adapter.connectHandler(device, connected, nil)
 				}
 			case dbusSignalPropertiesChanged:
 				// Skip any signals that are not the Device1 interface.
@@ -673,7 +673,7 @@ func (a *Advertisement) handleDBusSignals() {
 						continue
 					}
 
-					a.adapter.connectHandler(device, connected)
+					a.adapter.connectHandler(device, connected, nil)
 				}
 			}
 		}

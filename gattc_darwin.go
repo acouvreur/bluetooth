@@ -11,6 +11,12 @@ import (
 
 var (
 	errWriteWithoutResponseTimeout = errors.New("bluetooth: write without response timed out waiting for buffer space")
+	errTimeoutEnableNotifications  = errors.New("timeout on EnableNotifications")
+)
+
+var (
+	_ GATTCService        = (*DeviceService)(nil)
+	_ GATTCCharacteristic = (*DeviceCharacteristic)(nil)
 )
 
 // DiscoverServices starts a service discovery procedure. Pass a list of service

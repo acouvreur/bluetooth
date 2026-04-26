@@ -41,6 +41,8 @@ func init() {
 	secModeOpen.set_bitfield_lv(1)
 }
 
+var _ BLEAdapter = (*Adapter)(nil)
+
 // Adapter is a dummy adapter: it represents the connection to the (only)
 // SoftDevice on the chip.
 type Adapter struct {
@@ -48,7 +50,7 @@ type Adapter struct {
 	scanning          bool
 	charWriteHandlers []charWriteHandler
 
-	connectHandler func(device Device, connected bool)
+	connectHandler func(device Device, connected bool, err error)
 }
 
 // DefaultAdapter is the default adapter on the current system. On Nordic chips,
@@ -56,7 +58,7 @@ type Adapter struct {
 //
 // Make sure to call Enable() before using it to initialize the adapter.
 var DefaultAdapter = &Adapter{isDefault: true,
-	connectHandler: func(device Device, connected bool) {
+	connectHandler: func(device Device, connected bool, err error) {
 		return
 	}}
 

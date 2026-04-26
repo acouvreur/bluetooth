@@ -48,7 +48,7 @@ func handleEvent() {
 				Address:          Address{makeMACAddress(connectEvent.peer_addr)},
 				connectionHandle: gapEvent.conn_handle,
 			}
-			DefaultAdapter.connectHandler(device, true)
+			DefaultAdapter.connectHandler(device, true, nil)
 		case C.BLE_GAP_EVT_DISCONNECTED:
 			if defaultAdvertisement.isAdvertising.Get() != 0 {
 				// The advertisement was running but was automatically stopped
@@ -63,7 +63,7 @@ func handleEvent() {
 			device := Device{
 				connectionHandle: gapEvent.conn_handle,
 			}
-			DefaultAdapter.connectHandler(device, false)
+			DefaultAdapter.connectHandler(device, false, nil)
 		case C.BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
 			// Respond with the default PPCP connection parameters by passing
 			// nil:
@@ -126,4 +126,25 @@ func makeMACAddress(addr C.ble_gap_addr_t) MACAddress {
 		MAC:      makeAddress(addr.addr),
 		isRandom: addr.addr_type != 0,
 	}
+}
+
+// Connect starts a connection attempt to the given peripheral device address.
+//
+// Not yet implemented on the nrf51.
+func (a *Adapter) Connect(address Address, params ConnectionParams) (Device, error) {
+	return Device{}, errNotYetImplmented
+}
+
+// Scan starts a BLE scan. It is stopped by a call to StopScan.
+//
+// Not yet implemented on the nrf51.
+func (a *Adapter) Scan(callback func(*Adapter, ScanResult)) (err error) {
+	return errNotYetImplmented
+}
+
+// StopScan stops any in-progress scan.
+//
+// Not yet implemented on the nrf51.
+func (a *Adapter) StopScan() error {
+	return errNotYetImplmented
 }

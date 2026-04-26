@@ -259,14 +259,25 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 		for i := uint32(0); i < size; i++ {
 			element, _ := vector.GetAt(i)
 			manData := (*advertisement.BluetoothLEManufacturerData)(element)
+
 			companyID, _ := manData.GetCompanyId()
 			buffer, _ := manData.GetData()
 			manufacturerData = append(manufacturerData, ManufacturerDataElement{
 				CompanyID: companyID,
 				Data:      bufferToSlice(buffer),
 			})
-			buffer.Release()
-			manData.Release()
+		}
+
+		// Extract service UUIDs
+		vector, _ = winAdv.GetServiceUuids()
+		size, _ = vector.GetSize()
+		for i := uint32(0); i < size; i++ {
+			element, _ := vector.GetAt(i)
+			// element is not a pointer, but a GUID struct. But we cannot convert
+			// unsafe.Pointer to a non-pointer type, so instead we are doing this:
+			serviceGUID := (*syscall.GUID)(unsafe.Pointer(&element))
+			uuid := GUIDToUUID(*serviceGUID)
+			serviceUUIDs = append(serviceUUIDs, uuid)
 		}
 
 		// Extract service UUIDs
@@ -300,6 +311,23 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 	}
 
 	return result
+}
+
+func GUIDToUUID(guid syscall.GUID) UUID {
+	return NewUUID([16]byte{
+		byte(guid.Data1 >> 24),
+		byte(guid.Data1 >> 16),
+		byte(guid.Data1 >> 8),
+		byte(guid.Data1),
+		byte(guid.Data2 >> 8),
+		byte(guid.Data2),
+		byte(guid.Data3 >> 8),
+		byte(guid.Data3),
+		guid.Data4[0], guid.Data4[1],
+		guid.Data4[2], guid.Data4[3],
+		guid.Data4[4], guid.Data4[5],
+		guid.Data4[6], guid.Data4[7],
+	})
 }
 
 func bufferToSlice(buffer *streams.IBuffer) []byte {
@@ -454,7 +482,7 @@ func (a *Adapter) ConnectWithContext(ctx context.Context, address Address, param
 		}
 
 		if a.connectHandler != nil {
-			a.connectHandler(device, status == bluetooth.BluetoothConnectionStatusConnected)
+			a.connectHandler(device, status == bluetooth.BluetoothConnectionStatusConnected, err)
 		}
 	})
 
