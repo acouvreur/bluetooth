@@ -2,6 +2,7 @@ package bluetooth
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"runtime"
 	"sync"
@@ -67,9 +68,9 @@ func (c *L2CAPConn) Read(p []byte) (int, error) {
 		}
 		c.mu.Unlock()
 
-		n := c.channel.Read(p)
-		if n < 0 {
-			return 0, errors.New("bluetooth: L2CAP read error")
+		n, err := c.channel.Read(p)
+		if err != nil {
+			return 0, fmt.Errorf("bluetooth: L2CAP read error: %v", err)
 		}
 		if n > 0 {
 			return n, nil
@@ -112,9 +113,9 @@ func (c *L2CAPConn) Write(p []byte) (int, error) {
 			continue
 		}
 
-		n := c.channel.Write(p[total:])
-		if n < 0 {
-			return total, errors.New("bluetooth: L2CAP write error")
+		n, err := c.channel.Write(p[total:])
+		if err != nil {
+			return total, fmt.Errorf("bluetooth: L2CAP write error: %v", err)
 		}
 		if n > 0 {
 			total += n

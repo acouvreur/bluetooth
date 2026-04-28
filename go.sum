@@ -25,8 +25,8 @@ github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXf
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.7.5 h1:s5PTfem8p8EbKQOctVV53k6jCJt3UX4IEJzwh+C324Q=
 github.com/stretchr/testify v1.7.5/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
-github.com/tinygo-org/cbgo v0.0.5-0.20260404133704-78b73a9c8e7e h1:6rWS9GYjNL5fM9R57DO9sm0k29i0083HhSfJCzEmq2Q=
-github.com/tinygo-org/cbgo v0.0.5-0.20260404133704-78b73a9c8e7e/go.mod h1:FruLOLNWPVyKyydTExa3RiPBjlAiorVsfRizhv4evoM=
+github.com/tinygo-org/cbgo v0.0.5-0.20260425172657-b5694b899733 h1:K4yWKK+LrqY9FHD9g8JllPSJa4899rjI+/JYozHcM8E=
+github.com/tinygo-org/cbgo v0.0.5-0.20260425172657-b5694b899733/go.mod h1:FruLOLNWPVyKyydTExa3RiPBjlAiorVsfRizhv4evoM=
 github.com/tinygo-org/pio v0.3.0 h1:opEnOtw58KGB4RJD3/n/Rd0/djYGX3DeJiXLI6y/yDI=
 github.com/tinygo-org/pio v0.3.0/go.mod h1:wf6c6lKZp+pQOzKKcpzchmRuhiMc27ABRuo7KVnaMFU=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
