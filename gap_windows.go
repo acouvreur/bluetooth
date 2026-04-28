@@ -341,23 +341,6 @@ func bufferToSlice(buffer *streams.IBuffer) []byte {
 	return data
 }
 
-func GUIDToUUID(guid syscall.GUID) UUID {
-	return NewUUID([16]byte{
-		byte(guid.Data1 >> 24),
-		byte(guid.Data1 >> 16),
-		byte(guid.Data1 >> 8),
-		byte(guid.Data1),
-		byte(guid.Data2 >> 8),
-		byte(guid.Data2),
-		byte(guid.Data3 >> 8),
-		byte(guid.Data3),
-		guid.Data4[0], guid.Data4[1],
-		guid.Data4[2], guid.Data4[3],
-		guid.Data4[4], guid.Data4[5],
-		guid.Data4[6], guid.Data4[7],
-	})
-}
-
 // StopScan stops any in-progress scan. It can be called from within a Scan
 // callback to stop the current scan. If no scan is in progress, an error will
 // be returned.
